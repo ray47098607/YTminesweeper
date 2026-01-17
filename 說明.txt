@@ -1,3 +1,5 @@
+行開頭英文的都是指令
+
 先在本檔案資料夾開啟終端
 
 python -m venv .\environment
@@ -15,3 +17,4 @@ python app.py
 啟動
 
 連線 http://localhost:5000/
+
