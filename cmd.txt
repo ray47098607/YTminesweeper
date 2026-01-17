@@ -1,0 +1,5 @@
+.\Scripts\activate.ps1
+啟用虛擬環境
+pip install -r requirements.txt
+安裝依賴 (requirements.txt)
+python app.py
