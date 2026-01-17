@@ -1,5 +1,17 @@
-.\Scripts\activate.ps1
+先在本檔案資料夾開啟終端
+
+python -m venv .\environment
+創虛擬環境
+
+.\environment\Scripts\activate.ps1
 啟用虛擬環境
+
 pip install -r requirements.txt
 安裝依賴 (requirements.txt)
+
+app.py裡面填聊天室id
+
 python app.py
+啟動
+
+連線 http://localhost:5000/
