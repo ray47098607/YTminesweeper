@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <title>直播互動踩地雷 </title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: white;
+            text-align: center;
+        }
+
+        .controls {
+            margin: 15px;
+            padding: 15px;
+            background: #333;
+            border-radius: 8px;
+            display: inline-block;
+        }
+
+        input {
+            width: 50px;
+            padding: 5px;
+            text-align: center;
+        }
+
+        button {
+            padding: 5px 15px;
+            background: #27ae60;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        .game-wrapper {
+            display: inline-block;
+            background: #555;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .row {
+            display: flex;
+        }
+
+        .cell {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #777;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #bbb;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            position: relative;
+            box-sizing: border-box;
+        }
+
+        .cell.revealed {
+            background: #eee;
+            border-color: #ccc;
+        }
+
+        .cell.mine {
+            background: #e74c3c !important;
+        }
+
+        .cell.flagged {
+            background: #f1c40f;
+        }
+
+        .cell.label {
+            background: #333;
+            color: #fff;
+            border-color: #222;
+            font-size: 12px;
+        }
+
+        /* 紅線與輔助數字 */
+        .r-border {
+            border-right: 2px solid rgba(255, 0, 0, 0.8) !important;
+        }
+
+        .b-border {
+            border-bottom: 2px solid rgba(255, 0, 0, 0.8) !important;
+        }
+
+        .guide-num {
+            position: absolute;
+            bottom: 0px;
+            right: 1px;
+            font-size: 9px;
+            color: red;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 0 1px;
+            pointer-events: none;
+            line-height: 1;
+        }
+
+        .n1 {
+            color: blue;
+        }
+
+        .n2 {
+            color: green;
+        }
+
+        .n3 {
+            color: red;
+        }
+
+        .n4 {
+            color: darkblue;
+        }
+
+        #log {
+            margin-top: 10px;
+            color: #f1c40f;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+
+        /* 聊天室容器：固定在右上角 */
+        #chat-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 250px;
+            height: 400px;
+            background: rgba(0, 0, 0, 0.7);
+            /* 半透明黑 */
+            border: 1px solid #444;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            pointer-events: none;
+            /* 讓滑鼠可以穿透，不影響點擊地圖 */
+        }
+
+        #chat-header {
+            background: #444;
+            padding: 5px 10px;
+            font-size: 14px;
+            border-radius: 8px 8px 0 0;
+            text-align: left;
+        }
+
+        #chat-messages {
+            flex: 1;
+            overflow-y: hidden;
+            /* 直播用通常隱藏捲軸，只看最新訊息 */
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            text-align: left;
+        }
+
+        .chat-item {
+            font-size: 14px;
+            line-height: 1.4;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .chat-user {
+            color: #3498db;
+            font-weight: bold;
+        }
+
+        .chat-msg {
+            color: #fff;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateX(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>💣 YouTube 指令踩地雷 (座標從1開始)</h1>
+    指令範例: !open A 1 或 !flag B 5<br>
+    <div class="controls">
+        寬(X): <input type="number" id="w" value="15">
+        高(Y): <input type="number" id="h" value="10">
+        雷數: <input type="number" id="m" value="20">
+        <button onclick="initGame()">生成新地圖</button>
+    </div>
+    <div id="log">指令範例: !open A 1 或 !flag B 5</div>
+
+    <div class="game-wrapper" id="board"></div>
+    <div id="chat-container">
+        <div id="chat-header">💬 直播聊天室</div>
+        <div id="chat-messages"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        let board = [], rows, cols, mines, gameActive = true;
+
+        function indexToLetter(idx) {
+            let label = "";
+            while (idx >= 0) {
+                label = String.fromCharCode((idx % 26) + 65) + label;
+                idx = Math.floor(idx / 26) - 1;
+            }
+            return label;
+        }
+
+        function initGame() {
+            cols = parseInt(document.getElementById('w').value);
+            rows = parseInt(document.getElementById('h').value);
+            mines = parseInt(document.getElementById('m').value);
+            board = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ({
+                isMine: false, rev: false, count: 0, isFlagged: false
+            })));
+            gameActive = true;
+
+            let p = 0;
+            while (p < mines) {
+                let r = Math.floor(Math.random() * rows), c = Math.floor(Math.random() * cols);
+                if (!board[r][c].isMine) { board[r][c].isMine = true; p++; }
+            }
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (board[r][c].isMine) continue;
+                    let n = 0;
+                    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+                        let nr = r + i, nc = c + j;
+                        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && board[nr][nc].isMine) n++;
+                    }
+                    board[r][c].count = n;
+                }
+            }
+            render();
+        }
+
+        function render() {
+            const el = document.getElementById('board');
+            el.innerHTML = '';
+
+            // --- 頂部 X 軸標籤 ---
+            let hr = document.createElement('div'); hr.className = 'row';
+            hr.appendChild(createCell(' ', 'label'));
+            for (let c = 0; c < cols; c++) {
+                let cell = createCell(indexToLetter(c), 'label');
+                if ((c + 1) % 5 === 0 && c !== cols - 1) cell.classList.add('r-border');
+                hr.appendChild(cell);
+            }
+            el.appendChild(hr);
+
+            // --- 生成遊戲區 ---
+            for (let r = 0; r < rows; r++) {
+                let rowDiv = document.createElement('div'); rowDiv.className = 'row';
+
+                // 左側 Y 軸標籤：顯示 r + 1
+                let labelCell = createCell(r + 1, 'label');
+                if ((r + 1) % 5 === 0 && r !== rows - 1) labelCell.classList.add('b-border');
+                rowDiv.appendChild(labelCell);
+
+                for (let c = 0; c < cols; c++) {
+                    let d = board[r][c];
+                    let div = document.createElement('div');
+                    div.className = 'cell';
+                    if (d.rev) {
+                        div.classList.add('revealed');
+                        if (d.isMine) { div.innerText = '💣'; div.classList.add('mine'); }
+                        else if (d.count > 0) { div.innerText = d.count; div.classList.add('n' + d.count); }
+                    } else if (d.isFlagged) {
+                        div.innerText = '🚩';
+                        div.classList.add('flagged');
+                    }
+
+                    // 紅線
+                    if ((c + 1) % 5 === 0 && c !== cols - 1) {
+                        div.classList.add('r-border');
+                        if (!div.querySelector('.guide-num')) {
+                            let guide = document.createElement('span');
+                            guide.className = 'guide-num';
+                            guide.innerText = r + 1;
+                            div.appendChild(guide);
+                        }
+                    }
+                    if ((r + 1) % 5 === 0 && r !== rows - 1) {
+                        div.classList.add('b-border');
+
+                        let guide = document.createElement('span');
+                        guide.className = 'guide-num';
+                        guide.innerText = indexToLetter(c);
+                        div.appendChild(guide);
+
+                    }
+
+                    // 傳入的 label 也要改成 1-based 方便 Log 顯示
+                    let coordLabel = indexToLetter(c) + (r + 1);
+                    div.onclick = () => remoteOpen(r, c, "主播", coordLabel);
+                    div.oncontextmenu = (e) => { e.preventDefault(); remoteFlag(r, c, "主播", coordLabel); };
+
+                    rowDiv.appendChild(div);
+                }
+                el.appendChild(rowDiv);
+            }
+        }
+
+        function createCell(text, cls) {
+            let d = document.createElement('div');
+            d.className = 'cell ' + (cls || '');
+            d.innerText = text;
+            return d;
+        }
+
+        function remoteOpen(r, c, user, label) {
+            if (!gameActive || r < 0 || r >= rows || c < 0 || c >= cols) return;
+            if (board[r][c].rev || board[r][c].isFlagged) return;
+
+            board[r][c].rev = true;
+            let res = "SAFE";
+
+            if (board[r][c].isMine) {
+                res = "BOOM"; gameActive = false;
+                board.forEach(row => row.forEach(cc => { if (cc.isMine) cc.rev = true; }));
+                document.getElementById('log').innerText = `💥 [${user}] 炸了！`;
+            } else {
+                if (board[r][c].count === 0) expand(r, c);
+                if (board.every(row => row.every(cc => cc.isMine || cc.rev))) {
+                    res = "WIN"; gameActive = false;
+                    document.getElementById('log').innerText = `🎉 [${user}] 獲勝！`;
+                } else {
+                    document.getElementById('log').innerText = `[${user}] 開啟 ${label}`;
+                }
+            }
+            render();
+            socket.emit('report_result', { user, coord: label, result: res });
+        }
+
+        function remoteFlag(r, c, user, label) {
+            if (!gameActive || r < 0 || r >= rows || c < 0 || c >= cols) return;
+            if (board[r][c].rev) return;
+
+            board[r][c].isFlagged = !board[r][c].isFlagged;
+            document.getElementById('log').innerText = `[${user}] ${board[r][c].isFlagged ? '標記' : '取消'} ${label}`;
+            render();
+            socket.emit('report_result', { user, coord: label, result: "FLAG" });
+        }
+
+        function expand(r, c) {
+            for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+                let nr = r + i, nc = c + j;
+                if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !board[nr][nc].rev && !board[nr][nc].isMine && !board[nr][nc].isFlagged) {
+                    board[nr][nc].rev = true;
+                    if (board[nr][nc].count === 0) expand(nr, nc);
+                }
+            }
+        }
+
+        // 接收普通聊天訊息
+        socket.on('new_chat', function (data) {
+            const chatBox = document.getElementById('chat-messages');
+
+            // 建立新訊息元素
+            const item = document.createElement('div');
+            item.className = 'chat-item';
+            // 如果是指令，給予特殊顏色與樣式
+            if (data.is_cmd) {
+                item.style.background = "rgba(241, 196, 15, 0.2)"; // 淡淡的黃色背景
+                item.style.borderLeft = "3px solid #f1c40f";
+                item.style.paddingLeft = "5px";
+                item.innerHTML = `<span class="chat-user" style="color:#f1c40f">${data.user}:</span> 
+                          <span class="chat-msg" style="color:#f1c40f; font-weight:bold;">${data.msg}</span>`;
+            } else {
+                item.innerHTML = `<span class="chat-user">${data.user}:</span> 
+                          <span class="chat-msg">${data.msg}</span>`;
+            }
+
+            
+            chatBox.appendChild(item);
+
+            // 保持最新訊息在底部，並限制訊息數量避免過多卡頓
+            if (chatBox.childNodes.length > 15) {
+                chatBox.removeChild(chatBox.firstChild);
+            }
+
+            // 自動捲動到底部
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+
+
+
+        // 確保有這一段監聽
+        socket.on('game_command', (data) => {
+            // 這一行非常重要，能在瀏覽器 Console 看到是否有收到
+            console.log("收到後端指令:", data);
+
+            if (data.action === 'open') remoteOpen(data.y, data.x, data.user, data.coord_label);
+            if (data.action === 'flag') remoteFlag(data.y, data.x, data.user, data.coord_label);
+        });
+
+        // 加入連線測試
+        socket.on('connect', () => {
+            console.log("已連線到後端伺服器！");
+            document.getElementById('log').innerText = "系統連線成功，等待指令...";
+        });
+
+        socket.on('disconnect', () => {
+            console.log("與後端斷開連線...");
+            document.getElementById('log').innerText = "⚠️ 系統斷線，請檢查 Python 是否還在執行";
+        });
+
+        initGame();
+    </script>
+</body>
+
+</html>
