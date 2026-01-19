@@ -11,12 +11,13 @@ python -m venv .\environment
 pip install -r requirements.txt
 安裝依賴 (requirements.txt)
 
-到app.py裡面填聊天室id
+--到app.py裡面填聊天室id-- 最新版不用
 
 python app.py
 啟動
 
 連線 http://localhost:5000/
+
 
 
 
