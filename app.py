@@ -14,7 +14,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # --- 必填設定 ---
 # 請務必確認這裡是 "直播 ID" 而不是 "網址"
-YOUTUBE_VIDEO_ID = "你的直播影片ID" #你的直播影片ID
+YOUTUBE_VIDEO_ID = input("你的直播影片ID:")
 CSV_FILE = 'minesweeper_log2.csv'
 
 
@@ -136,6 +136,5 @@ if __name__ == '__main__':
     
     print("✨ 伺服器啟動中: http://localhost:5000")
     socketio.run(app, port=5000, debug=False)
-
 
 
